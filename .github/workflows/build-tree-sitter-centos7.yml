@@ -1,0 +1,90 @@
+name: build-tree-sitter-centos7
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build-centos7:
+    runs-on: ubuntu-latest
+
+    container:
+      image: centos:7
+
+    steps:
+      - name: Install base packages
+        run: |
+          yum -y update
+          yum -y install \
+            curl \
+            git \
+            tar \
+            gzip \
+            zip \
+            unzip \
+            which \
+            make \
+            gcc \
+            gcc-c++ \
+            file \
+            ca-certificates
+          update-ca-trust || true
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        run: |
+          curl https://sh.rustup.rs -sSf | sh -s -- -y
+          echo 'export PATH="$HOME/.cargo/bin:$PATH"' >> ~/.bashrc
+
+      - name: Build tree-sitter-cli
+        shell: bash
+        run: |
+          source ~/.bashrc
+          rustc --version
+          cargo --version
+
+          # 如果你的仓库就是 tree-sitter 源码仓库
+          cargo build -p tree-sitter-cli --release
+
+          mkdir -p dist
+          cp target/release/tree-sitter dist/tree-sitter-linux-x86_64-centos7
+          chmod +x dist/tree-sitter-linux-x86_64-centos7
+
+          file dist/tree-sitter-linux-x86_64-centos7
+          ldd dist/tree-sitter-linux-x86_64-centos7 || true
+
+          cd dist
+          tar -czf tree-sitter-linux-x86_64-centos7.tar.gz tree-sitter-linux-x86_64-centos7
+          sha256sum tree-sitter-linux-x86_64-centos7.tar.gz > tree-sitter-linux-x86_64-centos7.tar.gz.sha256
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tree-sitter-linux-x86_64-centos7
+          path: dist/*
+
+      - name: Create GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --notes "CentOS 7 build of tree-sitter CLI"
+
+      - name: Upload release assets
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release upload "${GITHUB_REF_NAME}" \
+            dist/tree-sitter-linux-x86_64-centos7.tar.gz \
+            dist/tree-sitter-linux-x86_64-centos7.tar.gz.sha256 \
+            --clobber
