@@ -15,47 +15,75 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
 
-      - name: Build in CentOS 7 container
+      - name: Build tree-sitter CLI in CentOS 7 container
         run: |
           docker run --rm \
-            -v "$GITHUB_WORKSPACE:/work" \
+            -v "${GITHUB_WORKSPACE}:/work" \
             -w /work \
             centos:7 \
             bash -lc '
-              set -e
+              set -euo pipefail
 
+              # Fix EOL CentOS 7 repos -> vault
               sed -i "s/^mirrorlist=/#mirrorlist=/g" /etc/yum.repos.d/CentOS-*.repo
               sed -i "s|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-*.repo
               yum clean all
               yum makecache
 
-              yum -y install curl git tar gzip zip unzip which make gcc gcc-c++ file ca-certificates
+              # Base build tools
+              yum -y install \
+                curl \
+                git \
+                tar \
+                gzip \
+                zip \
+                unzip \
+                which \
+                make \
+                gcc \
+                gcc-c++ \
+                file \
+                ca-certificates
+
+              # Rust
               curl https://sh.rustup.rs -sSf | sh -s -- -y
               source /root/.cargo/env
 
-              cargo build -p tree-sitter-cli --release
+              rustc --version
+              cargo --version
 
-              mkdir -p dist
-              cp target/release/tree-sitter dist/tree-sitter-linux-x86_64-centos7
-              chmod +x dist/tree-sitter-linux-x86_64-centos7
-              cd dist
+              # Build/install tree-sitter CLI from crates.io
+              cargo install tree-sitter-cli --locked --root /tmp/tree-sitter-root
+
+              mkdir -p /work/dist
+              cp /tmp/tree-sitter-root/bin/tree-sitter /work/dist/tree-sitter-linux-x86_64-centos7
+              chmod +x /work/dist/tree-sitter-linux-x86_64-centos7
+
+              file /work/dist/tree-sitter-linux-x86_64-centos7
+              ldd /work/dist/tree-sitter-linux-x86_64-centos7 || true
+              strings /work/dist/tree-sitter-linux-x86_64-centos7 | grep GLIBC_ | sort -u || true
+
+              cd /work/dist
               tar -czf tree-sitter-linux-x86_64-centos7.tar.gz tree-sitter-linux-x86_64-centos7
               sha256sum tree-sitter-linux-x86_64-centos7.tar.gz > tree-sitter-linux-x86_64-centos7.tar.gz.sha256
             '
 
-      - name: Upload artifact
+      - name: Upload workflow artifact
         uses: actions/upload-artifact@v4
         with:
           name: tree-sitter-linux-x86_64-centos7
           path: dist/*
 
-      - name: Create release
+      - name: Create GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            --title "${GITHUB_REF_NAME}" \
+            --generate-notes
 
       - name: Upload release assets
         if: startsWith(github.ref, 'refs/tags/')
