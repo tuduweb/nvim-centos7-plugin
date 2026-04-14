@@ -1,93 +1,118 @@
-- name: Build tree-sitter CLI in CentOS 7 container
-  run: |
-    docker run --rm \
-      -v "${GITHUB_WORKSPACE}:/work" \
-      -w /work \
-      centos:7 \
-      bash -lc '
-        set -euo pipefail
+name: build-tree-sitter-centos7
 
-        # Base repos
-        cat >/etc/yum.repos.d/CentOS-Base.repo <<'"'"'EOF'"'"'
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build in CentOS7
+        run: |
+          docker run --rm \
+            -v "${GITHUB_WORKSPACE}:/work" \
+            -w /work \
+            centos:7 \
+            /bin/bash -c '
+              set -euo pipefail
+
+              cat > /etc/yum.repos.d/CentOS-Base.repo <<EOF
 [base]
-name=CentOS-7 - Base
+name=CentOS-7 Base
 baseurl=http://vault.centos.org/7.9.2009/os/x86_64/
-gpgcheck=0
 enabled=1
+gpgcheck=0
 
 [updates]
-name=CentOS-7 - Updates
+name=CentOS-7 Updates
 baseurl=http://vault.centos.org/7.9.2009/updates/x86_64/
-gpgcheck=0
 enabled=1
+gpgcheck=0
 
 [extras]
-name=CentOS-7 - Extras
+name=CentOS-7 Extras
 baseurl=http://vault.centos.org/7.9.2009/extras/x86_64/
-gpgcheck=0
 enabled=1
+gpgcheck=0
 EOF
 
-        yum clean all
-        yum makecache
+              yum clean all
+              yum makecache
 
-        yum -y install centos-release-scl
+              yum -y install centos-release-scl
 
-        # SCLo repos
-        cat >/etc/yum.repos.d/CentOS-SCLo-scl.repo <<'"'"'EOF'"'"'
+              cat > /etc/yum.repos.d/CentOS-SCLo.repo <<EOF
 [centos-sclo-rh]
-name=CentOS-7 - SCLo rh
+name=CentOS-7 SCLo rh
 baseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/rh/
-gpgcheck=0
 enabled=1
+gpgcheck=0
 
 [centos-sclo-sclo]
-name=CentOS-7 - SCLo sclo
+name=CentOS-7 SCLo sclo
 baseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/sclo/
-gpgcheck=0
 enabled=1
+gpgcheck=0
 EOF
 
-        yum clean all
-        yum makecache
+              yum clean all
+              yum makecache
 
-        yum -y install \
-          curl \
-          git \
-          tar \
-          gzip \
-          zip \
-          unzip \
-          which \
-          make \
-          gcc \
-          gcc-c++ \
-          file \
-          ca-certificates \
-          findutils \
-          llvm-toolset-7 \
-          llvm-toolset-7-clang \
-          llvm-toolset-7-llvm \
-          llvm-toolset-7-llvm-devel
+              yum -y install \
+                curl \
+                git \
+                tar \
+                gzip \
+                zip \
+                unzip \
+                which \
+                make \
+                gcc \
+                gcc-c++ \
+                file \
+                findutils \
+                llvm-toolset-7 \
+                llvm-toolset-7-clang \
+                llvm-toolset-7-llvm \
+                llvm-toolset-7-llvm-devel
 
-        curl https://sh.rustup.rs -sSf | sh -s -- -y
-        source /root/.cargo/env
+              curl https://sh.rustup.rs -sSf | sh -s -- -y
+              source /root/.cargo/env
 
-        if [ -f /opt/rh/llvm-toolset-7/enable ]; then
-          source /opt/rh/llvm-toolset-7/enable
-        fi
+              source /opt/rh/llvm-toolset-7/enable
 
-        LIBCLANG_CANDIDATE=$(find /opt /usr -name "libclang.so*" 2>/dev/null | head -n 1 || true)
-        test -n "${LIBCLANG_CANDIDATE}"
-        export LIBCLANG_PATH=$(dirname "${LIBCLANG_CANDIDATE}")
+              export LIBCLANG_PATH=$(dirname $(find /opt -name "libclang.so*" | head -n 1))
 
-        cargo install tree-sitter-cli --locked --root /tmp/tree-sitter-root
+              cargo install tree-sitter-cli --locked --root /tmp/tree-sitter-root
 
-        mkdir -p /work/dist
-        cp /tmp/tree-sitter-root/bin/tree-sitter /work/dist/tree-sitter-linux-x86_64-centos7
-        chmod +x /work/dist/tree-sitter-linux-x86_64-centos7
+              mkdir -p /work/dist
+              cp /tmp/tree-sitter-root/bin/tree-sitter /work/dist/tree-sitter-linux-x86_64-centos7
 
-        cd /work/dist
-        tar -czf tree-sitter-linux-x86_64-centos7.tar.gz tree-sitter-linux-x86_64-centos7
-        sha256sum tree-sitter-linux-x86_64-centos7.tar.gz > tree-sitter-linux-x86_64-centos7.tar.gz.sha256
-      '
+              cd /work/dist
+              tar -czf tree-sitter-linux-x86_64-centos7.tar.gz tree-sitter-linux-x86_64-centos7
+              sha256sum tree-sitter-linux-x86_64-centos7.tar.gz > tree-sitter-linux-x86_64-centos7.tar.gz.sha256
+            '
+
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: tree-sitter-centos7
+          path: dist/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --generate-notes || true
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
