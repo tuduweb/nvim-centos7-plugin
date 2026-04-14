@@ -2,6 +2,9 @@ name: build-tree-sitter-centos7
 
 on:
   workflow_dispatch:
+  push:
+    tags:
+      - "v*"
 
 permissions:
   contents: write
@@ -45,11 +48,6 @@ jobs:
                 "gpgcheck=0" \
                 > /etc/yum.repos.d/CentOS-Base.repo
 
-              yum clean all
-              yum makecache
-
-              yum -y install centos-release-scl
-
               printf "%s\n" \
                 "[centos-sclo-rh]" \
                 "name=CentOS-7 SCLo rh" \
@@ -75,6 +73,8 @@ jobs:
                 gcc-c++ \
                 which \
                 findutils \
+                file \
+                ca-certificates \
                 llvm-toolset-7 \
                 llvm-toolset-7-clang \
                 llvm-toolset-7-llvm \
@@ -82,17 +82,22 @@ jobs:
 
               curl https://sh.rustup.rs -sSf | sh -s -- -y
               source /root/.cargo/env
-              source /opt/rh/llvm-toolset-7/enable
 
-              export LIBCLANG_PATH=$(dirname $(find /opt -name "libclang.so*" | head -n 1))
+              if [ -f /opt/rh/llvm-toolset-7/enable ]; then
+                source /opt/rh/llvm-toolset-7/enable
+              fi
+
+              export LIBCLANG_PATH=$(dirname "$(find /opt /usr -name "libclang.so*" | head -n 1)")
 
               cargo install tree-sitter-cli --locked --root /tmp/tree-sitter-root
 
               mkdir -p /work/dist
               cp /tmp/tree-sitter-root/bin/tree-sitter /work/dist/tree-sitter-linux-x86_64-centos7
+              chmod +x /work/dist/tree-sitter-linux-x86_64-centos7
 
               cd /work/dist
               tar -czf tree-sitter-linux-x86_64-centos7.tar.gz tree-sitter-linux-x86_64-centos7
+              sha256sum tree-sitter-linux-x86_64-centos7.tar.gz > tree-sitter-linux-x86_64-centos7.tar.gz.sha256
             '
 
       - name: Upload Artifact
@@ -100,3 +105,11 @@ jobs:
         with:
           name: tree-sitter-centos7
           path: dist/*
+
+      - name: Release
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${GITHUB_REF_NAME}" --generate-notes || true
+          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
