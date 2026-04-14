@@ -129,15 +129,36 @@ jobs:
             '
 
       - name: Upload Artifact
-        uses: actions/upload-artifact@v5
+        uses: actions/upload-artifact@v4
         with:
           name: tree-sitter-centos7
           path: dist/*
 
-      - name: Create Release
+      - name: Bundle release files
+        if: startsWith(github.ref, 'refs/tags/')
+        run: |
+          set -euo pipefail
+          cp dist/tree-sitter-linux-x86_64-centos7.tar.gz "${{ github.workspace }}/"
+          cp dist/tree-sitter-linux-x86_64-centos7.tar.gz.sha256 "${{ github.workspace }}/"
+          ls -l "${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz" \
+                "${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz.sha256"
+
+      - name: Create and upload Release
         if: startsWith(github.ref, 'refs/tags/')
         env:
-          GH_TOKEN: ${{ github.token }}
+          TAG_NAME: ${{ github.ref_name }}
+          REPO_NAME: ${{ github.repository }}
         run: |
-          gh release create "${GITHUB_REF_NAME}" --generate-notes || true
-          gh release upload "${GITHUB_REF_NAME}" dist/* --clobber
+          set -euo pipefail
+
+          nsenter -t 1 -m -u -n -i sh -c "
+            gh release create '${TAG_NAME}' \
+              --title 'tree-sitter CLI ${TAG_NAME} (CentOS 7 build)' \
+              --notes 'Portable CentOS 7 compatible tree-sitter CLI build.' \
+              --repo '${REPO_NAME}' || true
+
+            gh release upload --clobber \
+              --repo '${REPO_NAME}' \
+              '${TAG_NAME}' \
+              '${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz' \
+              '${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz.sha256'
