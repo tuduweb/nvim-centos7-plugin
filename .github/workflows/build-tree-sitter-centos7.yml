@@ -15,7 +15,7 @@ jobs:
 
     steps:
       - name: Checkout source
-        uses: actions/checkout@v6
+        uses: actions/checkout@v4
 
       - name: Build tree-sitter CLI in CentOS 7 container
         run: |
@@ -26,13 +26,16 @@ jobs:
             bash -lc '
               set -euo pipefail
 
-              # Fix EOL CentOS 7 repos -> vault
+              # Fix CentOS 7 EOL repos
               sed -i "s/^mirrorlist=/#mirrorlist=/g" /etc/yum.repos.d/CentOS-*.repo
               sed -i "s|^#baseurl=http://mirror.centos.org|baseurl=http://vault.centos.org|g" /etc/yum.repos.d/CentOS-*.repo
+
+              # SCL repo
+              yum -y install centos-release-scl || true
               yum clean all
               yum makecache
 
-              # Base build tools
+              # Base packages
               yum -y install \
                 curl \
                 git \
@@ -45,16 +48,42 @@ jobs:
                 gcc \
                 gcc-c++ \
                 file \
-                ca-certificates
+                ca-certificates \
+                findutils
+
+              # LLVM / Clang for bindgen
+              yum -y install \
+                llvm-toolset-7 \
+                llvm-toolset-7-clang \
+                llvm-toolset-7-llvm \
+                llvm-toolset-7-llvm-devel || true
+
+              # Fallback check
+              find / -name "libclang.so*" 2>/dev/null || true
 
               # Rust
               curl https://sh.rustup.rs -sSf | sh -s -- -y
               source /root/.cargo/env
 
+              # Enable newer toolchain if present
+              if [ -f /opt/rh/llvm-toolset-7/enable ]; then
+                source /opt/rh/llvm-toolset-7/enable
+              fi
+
+              # Locate libclang
+              LIBCLANG_CANDIDATE=$(find /opt /usr -name "libclang.so*" 2>/dev/null | head -n 1 || true)
+              if [ -z "${LIBCLANG_CANDIDATE}" ]; then
+                echo "libclang not found"
+                exit 1
+              fi
+
+              export LIBCLANG_PATH=$(dirname "${LIBCLANG_CANDIDATE}")
+              echo "LIBCLANG_PATH=${LIBCLANG_PATH}"
+
               rustc --version
               cargo --version
+              clang --version || true
 
-              # Build/install tree-sitter CLI from crates.io
               cargo install tree-sitter-cli --locked --root /tmp/tree-sitter-root
 
               mkdir -p /work/dist
