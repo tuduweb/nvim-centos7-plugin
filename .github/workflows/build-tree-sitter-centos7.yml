@@ -1,5 +1,4 @@
 name: build-tree-sitter-centos7
-
 on:
   workflow_dispatch:
   push:
@@ -12,7 +11,6 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-
     steps:
       - name: Checkout
         uses: actions/checkout@v5
@@ -25,104 +23,33 @@ jobs:
             centos:7 \
             /bin/bash -c '
               set -euo pipefail
-
+              # --- Repo Setup (Vault for CentOS 7 EOL) ---
               rm -f /etc/yum.repos.d/*.repo
+              printf "[base]\nname=CentOS-7 Base\nbaseurl=http://vault.centos.org/7.9.2009/os/x86_64/\nenabled=1\ngpgcheck=0\n\n[updates]\nname=CentOS-7 Updates\nbaseurl=http://vault.centos.org/7.9.2009/updates/x86_64/\nenabled=1\ngpgcheck=0\n\n[extras]\nname=CentOS-7 Extras\nbaseurl=http://vault.centos.org/7.9.2009/extras/x86_64/\nenabled=1\ngpgcheck=0\n" > /etc/yum.repos.d/CentOS-Base.repo
+              printf "[centos-sclo-rh]\nname=CentOS-7 SCLo rh\nbaseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/rh/\nenabled=1\ngpgcheck=0\n\n[centos-sclo-sclo]\nname=CentOS-7 SCLo sclo\nbaseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/sclo/\nenabled=1\ngpgcheck=0\n" > /etc/yum.repos.d/CentOS-SCLo.repo
+              
+              yum clean all && yum makecache
+              yum -y install curl git make which findutils file ca-certificates gcc gcc-c++ llvm-toolset-7-clang devtoolset-7-gcc devtoolset-7-gcc-c++
 
-              printf "%s\n" \
-                "[base]" \
-                "name=CentOS-7 Base" \
-                "baseurl=http://vault.centos.org/7.9.2009/os/x86_64/" \
-                "enabled=1" \
-                "gpgcheck=0" \
-                "" \
-                "[updates]" \
-                "name=CentOS-7 Updates" \
-                "baseurl=http://vault.centos.org/7.9.2009/updates/x86_64/" \
-                "enabled=1" \
-                "gpgcheck=0" \
-                "" \
-                "[extras]" \
-                "name=CentOS-7 Extras" \
-                "baseurl=http://vault.centos.org/7.9.2009/extras/x86_64/" \
-                "enabled=1" \
-                "gpgcheck=0" \
-                > /etc/yum.repos.d/CentOS-Base.repo
-
-              printf "%s\n" \
-                "[centos-sclo-rh]" \
-                "name=CentOS-7 SCLo rh" \
-                "baseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/rh/" \
-                "enabled=1" \
-                "gpgcheck=0" \
-                "" \
-                "[centos-sclo-sclo]" \
-                "name=CentOS-7 SCLo sclo" \
-                "baseurl=http://vault.centos.org/7.9.2009/sclo/x86_64/sclo/" \
-                "enabled=1" \
-                "gpgcheck=0" \
-                > /etc/yum.repos.d/CentOS-SCLo.repo
-
-              yum clean all
-              yum makecache
-
-              yum -y install \
-                curl \
-                git \
-                make \
-                which \
-                findutils \
-                file \
-                ca-certificates \
-                gcc \
-                gcc-c++ \
-                llvm-toolset-7-clang \
-                llvm-toolset-7-llvm \
-                llvm-toolset-7-llvm-devel \
-                devtoolset-7-gcc \
-                devtoolset-7-gcc-c++
-
+              # --- Toolchain Setup ---
               curl https://sh.rustup.rs -sSf | sh -s -- -y
               source /root/.cargo/env
+              source /opt/rh/llvm-toolset-7/enable || true
+              source /opt/rh/devtoolset-7/enable || true
 
-              if [ -f /opt/rh/llvm-toolset-7/enable ]; then
-                source /opt/rh/llvm-toolset-7/enable
-              fi
-              if [ -f /opt/rh/devtoolset-7/enable ]; then
-                source /opt/rh/devtoolset-7/enable
-              fi
-
-              LIBCLANG_SO=$(find /opt /usr -name "libclang.so*" 2>/dev/null | head -n 1 || true)
-              if [ -z "${LIBCLANG_SO}" ]; then
-                echo "libclang.so not found"
-                exit 1
-              fi
-              export LIBCLANG_PATH="$(dirname "${LIBCLANG_SO}")"
-
-              export CC="${CC:-clang}"
-              export CXX="${CXX:-g++}"
-              export CFLAGS="-std=gnu99"
-              export CXXFLAGS=""
-
-              rustc --version
-              cargo --version
-              ${CC} --version || true
-              ${CXX} --version || true
-              echo "LIBCLANG_PATH=${LIBCLANG_PATH}"
-
-              cargo install \
-                tree-sitter-cli \
-                --version 0.24.7 \
+              # --- Build Tree-sitter CLI v0.26.1 ---
+              export CC=clang
+              cargo install tree-sitter-cli \
+                --version 0.26.1 \
                 --locked \
                 --root /tmp/tree-sitter-root
 
               mkdir -p /work/dist
-              cp /tmp/tree-sitter-root/bin/tree-sitter /work/dist/tree-sitter-linux-x86_64-centos7
-              chmod +x /work/dist/tree-sitter-linux-x86_64-centos7
-
-              file /work/dist/tree-sitter-linux-x86_64-centos7
-              ldd /work/dist/tree-sitter-linux-x86_64-centos7 || true
-              strings /work/dist/tree-sitter-linux-x86_64-centos7 | grep GLIBC_ | sort -u || true
-
+              BINARY="/work/dist/tree-sitter-linux-x86_64-centos7"
+              cp /tmp/tree-sitter-root/bin/tree-sitter $BINARY
+              chmod +x $BINARY
+              
+              # --- Packaging ---
               cd /work/dist
               tar -czf tree-sitter-linux-x86_64-centos7.tar.gz tree-sitter-linux-x86_64-centos7
               sha256sum tree-sitter-linux-x86_64-centos7.tar.gz > tree-sitter-linux-x86_64-centos7.tar.gz.sha256
@@ -134,31 +61,23 @@ jobs:
           name: tree-sitter-centos7
           path: dist/*
 
-      - name: Bundle release files
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          set -euo pipefail
-          cp dist/tree-sitter-linux-x86_64-centos7.tar.gz "${{ github.workspace }}/"
-          cp dist/tree-sitter-linux-x86_64-centos7.tar.gz.sha256 "${{ github.workspace }}/"
-          ls -l "${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz" \
-                "${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz.sha256"
-
       - name: Create and upload Release
-        if: startsWith(github.ref, 'refs/tags/')
+        # 修改点：当是 tag 触发或者手动触发时都执行
+        if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
         env:
-          TAG_NAME: ${{ github.ref_name }}
-          REPO_NAME: ${{ github.repository }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # 如果是手动触发且没 tag，则使用运行编号作为临时版本号
+          TAG_NAME: ${{ github.ref_name || format('manual-build-{0}', github.run_number) }}
         run: |
           set -euo pipefail
-
-          nsenter -t 1 -m -u -n -i sh -c "
-            gh release create '${TAG_NAME}' \
-              --title 'tree-sitter CLI ${TAG_NAME} (CentOS 7 build)' \
-              --notes 'Portable CentOS 7 compatible tree-sitter CLI build.' \
-              --repo '${REPO_NAME}' || true
-
-            gh release upload --clobber \
-              --repo '${REPO_NAME}' \
-              '${TAG_NAME}' \
-              '${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz' \
-              '${{ github.workspace }}/tree-sitter-linux-x86_64-centos7.tar.gz.sha256'
+          # 确保 release 存在，如果不存在则创建（clobber 用于覆盖已有文件）
+          gh release create "${TAG_NAME}" \
+            --title "tree-sitter CLI Build (${TAG_NAME})" \
+            --notes "Portable CentOS 7 compatible tree-sitter CLI build. Version: 0.26.1" \
+            --repo "${{ github.repository }}" || true
+          
+          gh release upload "${TAG_NAME}" \
+            --clobber \
+            --repo "${{ github.repository }}" \
+            dist/tree-sitter-linux-x86_64-centos7.tar.gz \
+            dist/tree-sitter-linux-x86_64-centos7.tar.gz.sha256
