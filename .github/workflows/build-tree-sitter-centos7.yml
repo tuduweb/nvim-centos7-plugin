@@ -37,10 +37,10 @@ jobs:
               source /opt/rh/llvm-toolset-7/enable || true
               source /opt/rh/devtoolset-7/enable || true
 
-              # --- Build Tree-sitter CLI v0.26.1 ---
+              # --- Build Tree-sitter CLI v0.26.8 ---
               export CC=clang
               cargo install tree-sitter-cli \
-                --version 0.26.1 \
+                --version 0.26.8 \
                 --locked \
                 --root /tmp/tree-sitter-root
 
@@ -73,7 +73,7 @@ jobs:
           # 确保 release 存在，如果不存在则创建（clobber 用于覆盖已有文件）
           gh release create "${TAG_NAME}" \
             --title "tree-sitter CLI Build (${TAG_NAME})" \
-            --notes "Portable CentOS 7 compatible tree-sitter CLI build. Version: 0.26.1" \
+            --notes "Portable CentOS 7 compatible tree-sitter CLI build. Version: 0.26.8" \
             --repo "${{ github.repository }}" || true
           
           gh release upload "${TAG_NAME}" \
